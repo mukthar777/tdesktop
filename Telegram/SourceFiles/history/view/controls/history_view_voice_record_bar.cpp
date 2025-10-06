@@ -1820,6 +1820,13 @@ void VoiceRecordBar::toggleTTL() {
     }
 }
 
+bool VoiceRecordBar::isPaused() const {
+    return _paused.current();
+}
+
+bool VoiceRecordBar::isTTL() const {
+    return peekTTLState();
+}
 
 
 void VoiceRecordBar::startRecording() {

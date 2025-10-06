@@ -88,6 +88,9 @@ public:
 	void clearListenState();
 	void lockForKeyboard();
 	void toggleTTL();
+	    // vvv ADD THESE TWO LINES vvv
+    [[nodiscard]] bool isPaused() const;
+    [[nodiscard]] bool isTTL() const;
 
 	void orderControls();
 

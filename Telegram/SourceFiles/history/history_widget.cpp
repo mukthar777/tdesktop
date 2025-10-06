@@ -301,6 +301,8 @@ HistoryWidget::HistoryWidget(
 		return _list && _list->itemTop(view) >= 0;
 	}))
 , _topShadow(this) {
+	_announcer->setFixedSize(1, 1); // <-- ADD THIS
+    _announcer->setFocusPolicy(Qt::StrongFocus); // <-- AND THIS
 	setAcceptDrops(true);
 
 	session().downloaderTaskFinished() | rpl::start_with_next([=] {
@@ -358,34 +360,40 @@ HistoryWidget::HistoryWidget(
 	}, lifetime());
 	
 	_send->held(
-	) | rpl::start_with_next([=] {
-		if (_send->type() == Ui::SendButton::Type::Record) {
-			// 1. Command the recording to start.
-			_voiceRecordBar->startRecording();
-	
-			// 2. Now, listen for the 'recordingStateChanges' signal from the bar.
-			_voiceRecordBar->recordingStateChanges(
-			) | rpl::filter([](bool active) {
-				// We only care about the moment it becomes active.
-				return active;
-			}) | rpl::take(1) | rpl::start_with_next([=] {
-				// 3. ONCE it's active, set the focus and lock it.
-				_send->setFocus();
-				_voiceRecordBar->lockForKeyboard();
-			}, _voiceRecordBar->lifetime());
-		}
-	}, lifetime());
-		
-		
-	
-	_send->released() | rpl::start_with_next([=] {
-		if (_voiceRecordBar->isActive()) {
-			_voiceRecordBar->stop(true); 
-		}
-	}, lifetime());
+) | rpl::start_with_next([=] {
+    if (_send->type() == Ui::SendButton::Type::Record) {
+        _voiceRecordBar->startRecording();
+        
+        // Announce by shifting focus
+        const auto previousFocus = focusWidget();
+        _announcer->setAccessibleName(tr("Recording started"));
+        _announcer->setFocus();
+        if (previousFocus) {
+            base::call_delayed(100, this, [=] { previousFocus->setFocus(); });
+        }
+        
+        _voiceRecordBar->recordingStateChanges(
+        ) | rpl::filter([](bool active) {
+            return active;
+        }) | rpl::take(1) | rpl::start_with_next([=] {
+            _send->setFocus();
+            _voiceRecordBar->lockForKeyboard();
+        }, _voiceRecordBar->lifetime());
+    }
+}, lifetime());
 
-	
-	
+_send->released() | rpl::start_with_next([=] {
+    if (_voiceRecordBar->isActive()) {
+        // Announce by shifting focus
+        _announcer->setAccessibleName(tr("Message sent"));
+        _announcer->setFocus();
+
+        // Delay the action to let the announcement play
+        base::call_delayed(200, this, [=] {
+            _voiceRecordBar->stop(true);
+        });
+    }
+}, lifetime());
 
 	_mediaEditManager.updateRequests() | rpl::start_with_next([this] {
 		updateOverStates(mapFromGlobal(QCursor::pos()));
@@ -6984,22 +6992,50 @@ void HistoryWidget::jumpToReply(FullReplyTo to) {
 void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 	if (!_history) return;
 
-	 const auto commonModifiers = e->modifiers() & kCommonModifiers;
-	 if (_voiceRecordBar && _voiceRecordBar->isActive()) {
-		_voiceRecordBar->lockForKeyboard();
-        if (e->key() == Qt::Key_D) { 
-            _voiceRecordBar->stop(false); 
-            return;
-        } else if (e->key() == Qt::Key_Space && !(e->modifiers() & kCommonModifiers)) {
-            _voiceRecordBar->pauseForKeyboard(); 
-            return;
-        } else if (e->key() == Qt::Key_O) {
-             _voiceRecordBar->toggleTTL(); 
-             return;
-        }
-    }
+	const auto commonModifiers = e->modifiers() & kCommonModifiers;
 
-	
+	// --- Voice Recording Accessibility ---
+	if (_voiceRecordBar && _voiceRecordBar->isActive()) {
+		_voiceRecordBar->lockForKeyboard();
+		const auto key = e->key();
+
+		// --- Message Discarded ---
+		if (key == Qt::Key_D) {
+			_announcer->setAccessibleName(tr("Message discarded"));
+			_announcer->setFocus();
+			base::call_delayed(1000, this, [=] {
+				_voiceRecordBar->stop(false);
+			});
+			return;
+
+		// --- Pause / Resume ---
+		} else if (key == Qt::Key_Space && !commonModifiers) {
+			const auto text = _voiceRecordBar->isPaused()
+				? tr("Recording resumed")
+				: tr("Recording paused");
+			_announcer->setAccessibleName(text);
+			_announcer->setFocus();
+			base::call_delayed(1200, this, [=] {
+				_voiceRecordBar->pauseForKeyboard();
+			});
+			return;
+
+		// --- Toggle View Once ---
+		} else if (key == Qt::Key_O) {
+			_voiceRecordBar->toggleTTL();
+			const auto text = _voiceRecordBar->isTTL()
+				? tr("Set to view once")
+				: tr("View once disabled");
+			_announcer->setAccessibleName(text);
+			_announcer->setFocus();
+			base::call_delayed(1000, this, [=] {
+				// Delay just for accessibility announcement
+			});
+			return;
+		}
+	}
+
+	// --- Escape / Navigation / Misc Keys ---
 	if (e->key() == Qt::Key_Escape) {
 		if (hasFocus()) {
 			escape();
@@ -7013,22 +7049,16 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 	} else if (e->key() == Qt::Key_PageUp) {
 		_scroll->keyPressEvent(e);
 	} else if (e->key() == Qt::Key_Down && !commonModifiers) {
-		// _scroll->keyPressEvent(e);
-		if (!editingMessage()) { 
+		if (!editingMessage()) {
 			if (const auto inner = qobject_cast<HistoryInner*>(_scroll->widget())) {
 				inner->navigateDown();
 			}
 		}
 	} else if (e->key() == Qt::Key_Up && !commonModifiers) {
 		const auto inner = qobject_cast<HistoryInner*>(_scroll->widget());
-		
 		if (inner && inner->isNavigating()) {
-			// Case 1: Already navigating the list. Just continue.
 			inner->navigateUp();
 		} else if (!editingMessage()) {
-			// Case 2: Not navigating and not editing a message.
-			
-			// First, check if we should trigger the "edit last message" shortcut.
 			const auto item = _history
 				? _history->lastEditableMessage()
 				: nullptr;
@@ -7038,12 +7068,9 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 				&& !_editMsgId
 				&& !_replyTo) {
 				editMessage(item, {});
-				return; // Action taken, so we are done.
+				return;
 			}
-	
-			// If the shortcut didn't apply, start navigating.
 			if (inner) {
-				// THE CRITICAL FIX: Give the list focus BEFORE navigating.
 				inner->setFocus();
 				inner->navigateUp();
 			}
@@ -7058,11 +7085,14 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 		if (!replyToNextMessage()) {
 			e->ignore();
 		}
-	} else if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
+	}
+
+	// --- Return / Enter for Sending Messages ---
+	else if (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
 		if (_send->hasFocus()) {
-            e->ignore();
-            return;
-        }
+			e->ignore();
+			return;
+		}
 		if (!_botStart->isHidden()) {
 			sendBotStartCommand();
 		}
@@ -7071,13 +7101,31 @@ void HistoryWidget::keyPressEvent(QKeyEvent *e) {
 				Core::App().settings().sendSubmitWay(),
 				e->modifiers());
 			if (submitting) {
-				sendWithModifiers(e->modifiers());
-			}
+    // 1️⃣ Announce
+    _announcer->setAccessibleName(tr("Message sent"));
+    _announcer->setFocus();
+
+    // 2️⃣ Wait for screen reader to finish
+    base::call_delayed(1500, this, [=] {
+        // 3️⃣ Send the message
+        sendWithModifiers(e->modifiers());
+
+        // 4️⃣ Restore input field focus AFTER sending
+        base::call_delayed(100, this, [=] {
+            _field->setFocus();
+        });
+    });
+}
 		}
-	} else if ((e->key() == Qt::Key_O)
+	}
+
+	// --- Ctrl+O for Attachments ---
+	else if ((e->key() == Qt::Key_O)
 		&& (e->modifiers() == Qt::ControlModifier)) {
 		chooseAttach();
-	} else {
+	}
+
+	else {
 		e->ignore();
 	}
 }
