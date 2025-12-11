@@ -90,6 +90,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QTimer>
 #include <QAccessible>
 #include <QAccessibleEvent>
+#include <QGuiApplication> // <--- Added this one
+#include <QAccessibleInterface>
+#include <QDebug>
+
+
+#include <QAccessibleTableModelChangeEvent>
 
 namespace Dialogs {
 namespace {
@@ -757,24 +763,33 @@ void Widget::chosenRow(const ChosenRow &row) {
 				Window::SectionShow::Way::ClearStack);
 			hideChildList();
 		}
-	} else if (const auto folder = row.key.folder()) {
-		if (row.userpicClick) {
-			const auto list = Data::StorySourcesList::Hidden;
-			const auto &sources = session().data().stories().sources(list);
-			if (!sources.empty()) {
-				controller()->openPeerStories(sources.front().id, list);
-				return;
-			}
-		}
-		if (row.newWindow) {
-			controller()->showInNewWindow(Window::SeparateId(
-				Window::SeparateType::Archive,
-				&session()));
-			return;
-		}
-		controller()->openFolder(folder);
-		hideChildList();
-	}
+} else if (const auto folder = row.key.folder()) {
+        if (row.newWindow) {
+            controller()->showInNewWindow(Window::SeparateId(
+                Window::SeparateType::Archive,
+                &session()));
+            return;
+        }
+
+        // 1. Open Archive
+        controller()->openFolder(folder);
+        hideChildList();
+
+// --- FIX: Increased delay + Explicit Focus ---
+        if (QAccessible::isActive()) {
+            // Wait 300ms for the slide animation to finish completely
+            QTimer::singleShot(300, this, [this] {
+                // 1. Reset the List Structure (Fixes ID Collision)
+                QAccessibleTableModelChangeEvent modelEvent(this, QAccessibleTableModelChangeEvent::ModelReset);
+                QAccessible::updateAccessibility(&modelEvent);
+
+                // 2. Force Focus update (Tells SR "Look at this new list NOW")
+                QAccessibleEvent focusEvent(this, QAccessible::Focus);
+                QAccessible::updateAccessibility(&focusEvent);
+            });
+        }
+        // ---------------------------------------------
+    }
 	if (row.filteredRow && !session().supportMode()) {
 		if (_subsectionTopBar) {
 			_subsectionTopBar->toggleSearch(false, anim::type::instant);
@@ -2106,33 +2121,48 @@ void Widget::slideFinished() {
 }
 
 void Widget::escape() {
-	if (!cancelSearch({ .jumpBackToSearchedChat = true })) {
-		if (const auto forum = controller()->shownForum().current()) {
-			const auto id = controller()->windowId();
-			const auto initial = id.forum();
-			if (!initial) {
-				controller()->closeForum();
-			} else if (initial != forum) {
-				controller()->showForum(initial);
-			}
+    if (!cancelSearch({ .jumpBackToSearchedChat = true })) {
+        if (const auto forum = controller()->shownForum().current()) {
+            const auto id = controller()->windowId();
+            const auto initial = id.forum();
+            if (!initial) {
+                controller()->closeForum();
+            } else if (initial != forum) {
+                controller()->showForum(initial);
+            }
 		} else if (controller()->openedFolder().current()) {
-			if (!controller()->windowId().folder()) {
-				controller()->closeFolder();
-			}
-		} else if (controller()->activeChatEntryCurrent().key) {
-			controller()->content()->dialogsCancelled();
-		} else if (controller()->isPrimary()) {
-			const auto filters = &session().data().chatsFilters();
-			const auto &list = filters->list();
-			const auto first = list.empty() ? FilterId() : list.front().id();
-			if (controller()->activeChatsFilterCurrent() != first) {
-				controller()->setActiveChatsFilter(first);
-			}
-		}
-	} else if (!_searchState.inChat
-		&& controller()->activeChatEntryCurrent().key) {
-		controller()->content()->dialogsCancelled();
-	}
+            if (!controller()->windowId().folder()) {
+                controller()->closeFolder();
+
+// --- FIX: Increased delay + Explicit Focus ---
+                if (QAccessible::isActive()) {
+                    // Wait 300ms for the slide animation to finish
+                    QTimer::singleShot(300, this, [this] {
+                        // 1. Reset the List Structure
+                        QAccessibleTableModelChangeEvent modelEvent(this, QAccessibleTableModelChangeEvent::ModelReset);
+                        QAccessible::updateAccessibility(&modelEvent);
+
+                        // 2. Force Focus update
+                        QAccessibleEvent focusEvent(this, QAccessible::Focus);
+                        QAccessible::updateAccessibility(&focusEvent);
+                    });
+                }
+                // ---------------------------------------------
+            }
+		}else if (controller()->activeChatEntryCurrent().key) {
+            controller()->content()->dialogsCancelled();
+        } else if (controller()->isPrimary()) {
+            const auto filters = &session().data().chatsFilters();
+            const auto &list = filters->list();
+            const auto first = list.empty() ? FilterId() : list.front().id();
+            if (controller()->activeChatsFilterCurrent() != first) {
+                controller()->setActiveChatsFilter(first);
+            }
+        }
+    } else if (!_searchState.inChat
+        && controller()->activeChatEntryCurrent().key) {
+        controller()->content()->dialogsCancelled();
+    }
 }
 
 void Widget::submit() {
