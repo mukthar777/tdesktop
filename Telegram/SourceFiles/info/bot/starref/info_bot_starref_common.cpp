@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/new_badges.h"
 #include "ui/painter.h"
 #include "ui/vertical_list.h"
+#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
@@ -72,7 +73,7 @@ void ConnectStarRef(
 
 [[nodiscard]] object_ptr<Ui::RpWidget> CreateLinkIcon(
 		not_null<QWidget*> parent,
-		not_null<UserData*> bot,
+		not_null<Main::Session*> session,
 		int users) {
 	auto result = object_ptr<Ui::RpWidget>(parent);
 	const auto raw = result.data();
@@ -91,7 +92,7 @@ void ConnectStarRef(
 	const auto inner = QSize(innerSide, innerSide);
 	const auto state = raw->lifetime().make_state<State>(State{
 		.icon = ChatHelpers::GenerateLocalTgsSticker(
-			&bot->session(),
+			session,
 			u"starref_link"_q),
 	});
 	state->icon->overrideEmojiUsesTextColor(true);
@@ -389,14 +390,16 @@ void AddFullWidthButtonFooter(
 
 object_ptr<Ui::AbstractButton> MakeLinkLabel(
 		not_null<QWidget*> parent,
-		const QString &link) {
+		const QString &link,
+		const style::InputField *stOverride) {
+	const auto &st = stOverride ? *stOverride : st::dialogsFilter;
 	const auto text = link.startsWith(u"https://"_q)
 		? link.mid(8)
 		: link.startsWith(u"http://"_q)
 		? link.mid(7)
 		: link;
-	const auto margins = st::dialogsFilter.textMargins;
-	const auto height = st::dialogsFilter.heightMin;
+	const auto margins = st.textMargins;
+	const auto height = st.heightMin;
 	const auto skip = margins.left();
 
 	auto result = object_ptr<Ui::AbstractButton>(parent);
@@ -407,18 +410,18 @@ object_ptr<Ui::AbstractButton> MakeLinkLabel(
 		auto p = QPainter(raw);
 		auto hq = PainterHighQualityEnabler(p);
 		p.setPen(Qt::NoPen);
-		p.setBrush(st::dialogsFilter.textBg);
+		p.setBrush(st.textBg);
 		const auto radius = st::roundRadiusLarge;
 		p.drawRoundedRect(0, 0, raw->width(), height, radius, radius);
 
-		const auto font = st::dialogsFilter.style.font;
-		p.setPen(st::dialogsFilter.textFg);
+		const auto font = st.style.font;
+		p.setPen(st.textFg);
 		p.setFont(font);
 		const auto available = raw->width() - skip * 2;
 		p.drawText(
 			QRect(skip, margins.top(), available, font->height),
 			style::al_top,
-			font->elided(link, available));
+			font->elided(text, available));
 	}, raw->lifetime());
 
 	return result;
@@ -440,7 +443,7 @@ object_ptr<Ui::BoxContent> StarRefLinkBox(
 		});
 
 		box->addRow(
-			CreateLinkIcon(box, bot, row.state.users),
+			CreateLinkIcon(box, &bot->session(), row.state.users),
 			st::boxRowPadding + st::starrefJoinUserpicsPadding);
 		box->addRow(
 			object_ptr<Ui::CenterWrap<Ui::FlatLabel>>(
@@ -599,14 +602,8 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 		if (const auto average = program.revenuePerUser) {
 			const auto layout = box->verticalLayout();
 			const auto session = &initialRecipient->session();
-			const auto makeContext = [session](Fn<void()> update) {
-				return Core::MarkedTextContext{
-					.session = session,
-					.customEmojiRepaint = std::move(update),
-				};
-			};
 			auto text = Ui::Text::Colorized(Ui::CreditsEmoji(session));
-			text.append(Lang::FormatStarsAmountRounded(average));
+			text.append(Lang::FormatCreditsAmountRounded(average));
 			layout->add(
 				object_ptr<Ui::FlatLabel>(
 					box,
@@ -617,7 +614,7 @@ object_ptr<Ui::BoxContent> JoinStarRefBox(
 						Ui::Text::WithEntities),
 					st::starrefRevenueText,
 					st::defaultPopupMenu,
-					makeContext),
+					Core::TextContext({ .session = session })),
 				st::boxRowPadding);
 			Ui::AddSkip(layout, st::defaultVerticalListSkip);
 		}
@@ -753,7 +750,7 @@ object_ptr<Ui::BoxContent> ConfirmEndBox(Fn<void()> finish) {
 					object_ptr<Ui::FlatLabel>(
 						box,
 						text(Ui::Text::RichLangValue),
-						st::boxLabel),
+						st::blockUserConfirmation),
 					QMargins(st::boxTextFont->height, 0, 0, 0)),
 				margins);
 			padded->paintRequest() | rpl::start_with_next([=] {
@@ -915,7 +912,7 @@ std::unique_ptr<Ui::AbstractButton> MakePeerBubbleButton(
 			userpic->moveToLeft(left, 0, outer.width());
 			if (right) {
 				right->moveToLeft(
-					left + *width - padding.right() - right->width(),
+					left + *width - padding.right() - rwidth,
 					padding.top(),
 					outer.width());
 			}
@@ -982,11 +979,11 @@ void ConfirmUpdate(
 				object_ptr<Ui::FlatLabel>(
 					table,
 					std::move(label),
-					st::giveawayGiftCodeLabel),
+					table->st().defaultLabel),
 				object_ptr<Ui::FlatLabel>(
 					table,
 					value,
-					st::giveawayGiftCodeValue,
+					table->st().defaultValue,
 					st::defaultPopupMenu),
 				st::giveawayGiftCodeLabelMargin,
 				st::giveawayGiftCodeValueMargin);
@@ -1061,6 +1058,13 @@ ConnectedBots Parse(
 		});
 	}
 	return result;
+}
+
+object_ptr<Ui::RpWidget> CreateLinkHeaderIcon(
+		not_null<QWidget*> parent,
+		not_null<Main::Session*> session,
+		int usersCount) {
+	return CreateLinkIcon(parent, session, usersCount);
 }
 
 } // namespace Info::BotStarRef

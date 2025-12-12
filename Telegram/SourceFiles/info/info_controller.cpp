@@ -9,8 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/search_field_controller.h"
 #include "data/data_shared_media.h"
+#include "history/history.h"
 #include "info/info_content_widget.h"
 #include "info/info_memento.h"
+#include "info/global_media/info_global_media_widget.h"
 #include "info/media/info_media_widget.h"
 #include "core/application.h"
 #include "data/data_changes.h"
@@ -19,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_forum_topic.h"
 #include "data/data_forum.h"
+#include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_media_types.h"
 #include "data/data_download_manager.h"
@@ -34,6 +37,9 @@ Key::Key(not_null<PeerData*> peer) : _value(peer) {
 Key::Key(not_null<Data::ForumTopic*> topic) : _value(topic) {
 }
 
+Key::Key(not_null<Data::SavedSublist*> sublist) : _value(sublist) {
+}
+
 Key::Key(Settings::Tag settings) : _value(settings) {
 }
 
@@ -47,6 +53,9 @@ Key::Key(Statistics::Tag statistics) : _value(statistics) {
 }
 
 Key::Key(BotStarRef::Tag starref) : _value(starref) {
+}
+
+Key::Key(GlobalMedia::Tag global) : _value(global) {
 }
 
 Key::Key(not_null<PollData*> poll, FullMsgId contextId)
@@ -65,6 +74,8 @@ PeerData *Key::peer() const {
 		return *peer;
 	} else if (const auto topic = this->topic()) {
 		return topic->channel();
+	} else if (const auto sublist = this->sublist()) {
+		return sublist->owningHistory()->peer;
 	}
 	return nullptr;
 }
@@ -73,6 +84,14 @@ Data::ForumTopic *Key::topic() const {
 	if (const auto topic = std::get_if<not_null<Data::ForumTopic*>>(
 			&_value)) {
 		return *topic;
+	}
+	return nullptr;
+}
+
+Data::SavedSublist *Key::sublist() const {
+	if (const auto sublist = std::get_if<not_null<Data::SavedSublist*>>(
+			&_value)) {
+		return *sublist;
 	}
 	return nullptr;
 }
@@ -86,6 +105,10 @@ UserData *Key::settingsSelf() const {
 
 bool Key::isDownloads() const {
 	return v::is<Downloads::Tag>(_value);
+}
+
+bool Key::isGlobalMedia() const {
+	return v::is<GlobalMedia::Tag>(_value);
 }
 
 PeerData *Key::storiesPeer() const {
@@ -187,6 +210,7 @@ rpl::producer<SparseIdsMergedSlice> AbstractController::mediaSource(
 			SparseIdsMergedSlice::Key(
 				peer()->id,
 				topicId,
+				sublist() ? sublist()->sublistPeer()->id : PeerId(),
 				migratedPeerId(),
 				aroundId),
 			section().mediaType()),
@@ -330,6 +354,10 @@ rpl::producer<Wrap> Controller::wrapValue() const {
 	return _widget->wrapValue();
 }
 
+not_null<Ui::RpWidget*> Controller::wrapWidget() const {
+	return _widget;
+}
+
 bool Controller::validateMementoPeer(
 		not_null<ContentMemento*> memento) const {
 	return memento->peer() == peer()
@@ -346,11 +374,16 @@ void Controller::setSection(not_null<ContentMemento*> memento) {
 	updateSearchControllers(memento);
 }
 
+bool Controller::hasBackButton() const {
+	return _widget->hasBackButton();
+}
+
 void Controller::updateSearchControllers(
 		not_null<ContentMemento*> memento) {
 	using Type = Section::Type;
 	const auto type = _section.type();
-	const auto isMedia = (type == Type::Media);
+	const auto isMedia = (type == Type::Media)
+		|| (type == Type::GlobalMedia);
 	const auto mediaType = isMedia
 		? _section.mediaType()
 		: Section::MediaType::kCount;
@@ -362,13 +395,12 @@ void Controller::updateSearchControllers(
 	const auto hasMembersSearch = (type == Type::Members)
 		|| (type == Type::Profile);
 	const auto searchQuery = memento->searchFieldQuery();
-	if (isMedia) {
+	if (type == Type::Media) {
 		_searchController
 			= std::make_unique<Api::DelayedSearchController>(&session());
 		auto mediaMemento = dynamic_cast<Media::Memento*>(memento.get());
 		Assert(mediaMemento != nullptr);
-		_searchController->restoreState(
-			mediaMemento->searchState());
+		_searchController->restoreState(mediaMemento->searchState());
 	} else {
 		_searchController = nullptr;
 	}
@@ -449,7 +481,8 @@ rpl::producer<QString> Controller::mediaSourceQueryValue() const {
 }
 
 rpl::producer<QString> Controller::searchQueryValue() const {
-	return searchFieldController()->queryValue();
+	const auto controller = searchFieldController();
+	return controller ? controller->queryValue() : rpl::single(QString());
 }
 
 rpl::producer<SparseIdsMergedSlice> Controller::mediaSource(
@@ -470,6 +503,7 @@ rpl::producer<SparseIdsMergedSlice> Controller::mediaSource(
 			SparseIdsMergedSlice::Key(
 				query.peerId,
 				query.topicRootId,
+				query.monoforumPeerId,
 				query.migratedPeerId,
 				aroundId),
 			query.type),

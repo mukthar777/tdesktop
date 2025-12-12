@@ -105,6 +105,7 @@ public:
 
 	void setStartRecordingFilter(FilterCallback &&callback);
 	void setTTLFilter(FilterCallback &&callback);
+	void setPauseInsteadSend(bool pauseInsteadSend);
 
 	[[nodiscard]] bool isRecording() const;
 	[[nodiscard]] bool isRecordingLocked() const;
@@ -167,6 +168,7 @@ private:
 	[[nodiscard]] float64 activeAnimationRatio() const;
 
 	void computeAndSetLockProgress(QPoint globalPos);
+	[[nodiscard]] float64 calcLockProgress(QPoint globalPos);
 
 	[[nodiscard]] bool peekTTLState() const;
 	[[nodiscard]] bool takeTTLState() const;
@@ -205,6 +207,7 @@ private:
 	FilterCallback _hasTTLFilter;
 
 	bool _warningShown = false;
+	bool _pauseInsteadSend = false;
 
 	rpl::variable<bool> _recording = false;
 	rpl::variable<bool> _inField = false;

@@ -285,8 +285,9 @@ windowFilterSmallRemoveRight: 10px;
 windowFilterNameInput: InputField(defaultInputField) {
 	textMargins: margins(0px, 26px, 36px, 4px);
 }
+windowFilterStaticTitlePosition: point(0px, 5px);
 windowFilterIconToggleSize: size(36px, 36px);
-windowFilterIconTogglePosition: point(-4px, 12px);
+windowFilterIconTogglePosition: point(-4px, 18px);
 windwoFilterIconPanelPosition: point(-2px, -1px);
 windowFilterIconSingle: size(44px, 42px);
 windowFilterIconPadding: margins(10px, 36px, 10px, 8px);
@@ -315,10 +316,20 @@ windowArchiveToast: Toast(defaultToast) {
 	maxWidth: boxWideWidth;
 }
 
+windowFeeItem: Menu(defaultMenu) {
+	itemPadding: margins(17px, 3px, 17px, 4px);
+	itemRightSkip: 0px;
+	itemStyle: whenReadStyle;
+	itemFgOver: windowFg;
+	itemFgDisabled: windowFg;
+}
+
 ivWidthMin: 380px;
 ivHeightMin: 480px;
 ivWidthDefault: 600px;
 ivHeightDefault: 800px;
+
+maxWidthSharedMediaWindow: 419px;
 
 // Windows specific
 

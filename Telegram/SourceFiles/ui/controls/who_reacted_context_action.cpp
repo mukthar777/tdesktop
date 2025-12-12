@@ -359,7 +359,7 @@ void Action::paint(Painter &p) {
 	if (!_custom && !_content.singleCustomEntityData.isEmpty()) {
 		_custom = _customEmojiFactory(
 			_content.singleCustomEntityData,
-			[=] { update(); });
+			{ .repaint = [=] { update(); } });
 	}
 	if (_custom) {
 		const auto ratio = style::DevicePixelRatio();
@@ -602,6 +602,8 @@ void WhenAction::paint(Painter &p) {
 	p.fillRect(0, 0, width(), _height, _st.itemBg);
 	const auto &icon = (_content.type == WhoReadType::Edited)
 		? (selected ? st::whenEditedOver : st::whenEdited)
+		: (_content.type == WhoReadType::Original)
+		? (selected ? st::whenOriginalOver : st::whenOriginal)
 		: loading
 		? st::whoReadChecksDisabled
 		: selected
@@ -770,7 +772,9 @@ void WhoReactedEntryAction::setData(Data &&data) {
 	}
 	_type = data.type;
 	_custom = _customEmojiFactory
-		? _customEmojiFactory(data.customEntityData, [=] { update(); })
+		? _customEmojiFactory(
+			data.customEntityData,
+			{ .repaint = [=] { update(); } })
 		: nullptr;
 	const auto ratio = style::DevicePixelRatio();
 	const auto size = Emoji::GetSizeNormal() / ratio;

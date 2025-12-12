@@ -109,6 +109,9 @@ PhoneWidget::PhoneWidget(
 	) | rpl::start_with_next([=](const QString &added) {
 		_phone->addedToNumber(added);
 	}, _phone->lifetime());
+	_code->spacePressed() | rpl::start_with_next([=] {
+		submit();
+	}, _code->lifetime());
 	connect(_phone, &Ui::PhonePartInput::changed, [=] { phoneChanged(); });
 	connect(_code, &Ui::CountryCodeInput::changed, [=] { phoneChanged(); });
 
@@ -309,6 +312,9 @@ void PhoneWidget::phoneSubmitDone(const MTPauth_SentCode &result) {
 		goNext<CodeWidget>();
 	}, [&](const MTPDauth_sentCodeSuccess &data) {
 		finish(data.vauthorization());
+	}, [](const MTPDauth_sentCodePaymentRequired &) {
+		LOG(("API Error: Unexpected auth.sentCodePaymentRequired "
+			"(PhoneWidget::phoneSubmitDone)."));
 	});
 }
 

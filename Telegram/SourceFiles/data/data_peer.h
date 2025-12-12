@@ -23,6 +23,7 @@ enum class ChatRestriction;
 
 namespace Ui {
 class EmptyUserpic;
+struct BotVerifyDetails;
 } // namespace Ui
 
 namespace Main {
@@ -36,6 +37,8 @@ class Forum;
 class ForumTopic;
 class Session;
 class GroupCall;
+class SavedMessages;
+class SavedSublist;
 struct ReactionId;
 class WallPaper;
 
@@ -172,10 +175,21 @@ inline constexpr bool is_flag_type(PeerBarSetting) { return true; };
 using PeerBarSettings = base::flags<PeerBarSetting>;
 
 struct PeerBarDetails {
+	QString phoneCountryCode;
+	int registrationDate = 0; // YYYYMM or 0, YYYY > 2012, MM > 0.
+	TimeId nameChangeDate = 0;
+	TimeId photoChangeDate = 0;
 	QString requestChatTitle;
 	TimeId requestChatDate;
 	UserData *businessBot = nullptr;
 	QString businessBotManageUrl;
+	int paysPerMessage = 0;
+};
+
+struct PaintUserpicContext {
+	QPoint position;
+	int size = 0;
+	Ui::PeerUserpicShape shape = Ui::PeerUserpicShape::Auto;
 };
 
 class PeerData {
@@ -205,8 +219,8 @@ public:
 	bool changeBackgroundEmojiId(DocumentId id);
 
 	void setEmojiStatus(const MTPEmojiStatus &status);
-	void setEmojiStatus(DocumentId emojiStatusId, TimeId until = 0);
-	[[nodiscard]] DocumentId emojiStatusId() const;
+	void setEmojiStatus(EmojiStatusId emojiStatusId, TimeId until = 0);
+	[[nodiscard]] EmojiStatusId emojiStatusId() const;
 
 	[[nodiscard]] bool isUser() const {
 		return peerIsUser(id);
@@ -217,6 +231,7 @@ public:
 	[[nodiscard]] bool isChannel() const {
 		return peerIsChannel(id);
 	}
+	[[nodiscard]] bool isBot() const;
 	[[nodiscard]] bool isSelf() const;
 	[[nodiscard]] bool isVerified() const;
 	[[nodiscard]] bool isPremium() const;
@@ -225,13 +240,17 @@ public:
 	[[nodiscard]] bool isMegagroup() const;
 	[[nodiscard]] bool isBroadcast() const;
 	[[nodiscard]] bool isForum() const;
+	[[nodiscard]] bool isMonoforum() const;
 	[[nodiscard]] bool isGigagroup() const;
 	[[nodiscard]] bool isRepliesChat() const;
 	[[nodiscard]] bool isVerifyCodes() const;
+	[[nodiscard]] bool isFreezeAppealChat() const;
 	[[nodiscard]] bool sharedMediaInfo() const;
 	[[nodiscard]] bool savedSublistsInfo() const;
 	[[nodiscard]] bool hasStoriesHidden() const;
 	void setStoriesHidden(bool hidden);
+
+	[[nodiscard]] Ui::BotVerifyDetails *botVerifyDetails() const;
 
 	[[nodiscard]] bool isNotificationsUser() const {
 		return (id == peerFromUser(333000))
@@ -246,6 +265,10 @@ public:
 
 	[[nodiscard]] Data::Forum *forum() const;
 	[[nodiscard]] Data::ForumTopic *forumTopicFor(MsgId rootId) const;
+
+	[[nodiscard]] Data::SavedMessages *monoforum() const;
+	[[nodiscard]] Data::SavedSublist *monoforumSublistFor(
+		PeerId sublistPeerId) const;
 
 	[[nodiscard]] Data::PeerNotifySettings &notify() {
 		return _notify;
@@ -263,7 +286,13 @@ public:
 	[[nodiscard]] rpl::producer<bool> slowmodeAppliedValue() const;
 	[[nodiscard]] int slowmodeSecondsLeft() const;
 	[[nodiscard]] bool canManageGroupCall() const;
+	[[nodiscard]] bool amMonoforumAdmin() const;
 
+	[[nodiscard]] int starsPerMessage() const;
+	[[nodiscard]] int starsPerMessageChecked() const;
+
+	[[nodiscard]] UserData *asBot();
+	[[nodiscard]] const UserData *asBot() const;
 	[[nodiscard]] UserData *asUser();
 	[[nodiscard]] const UserData *asUser() const;
 	[[nodiscard]] ChatData *asChat();
@@ -278,11 +307,22 @@ public:
 	[[nodiscard]] const ChatData *asChatNotMigrated() const;
 	[[nodiscard]] ChannelData *asChannelOrMigrated();
 	[[nodiscard]] const ChannelData *asChannelOrMigrated() const;
+	[[nodiscard]] ChannelData *asMonoforum();
+	[[nodiscard]] const ChannelData *asMonoforum() const;
 
 	[[nodiscard]] ChatData *migrateFrom() const;
 	[[nodiscard]] ChannelData *migrateTo() const;
 	[[nodiscard]] not_null<PeerData*> migrateToOrMe();
 	[[nodiscard]] not_null<const PeerData*> migrateToOrMe() const;
+	[[nodiscard]] not_null<PeerData*> userpicPaintingPeer();
+	[[nodiscard]] not_null<const PeerData*> userpicPaintingPeer() const;
+	[[nodiscard]] Ui::PeerUserpicShape userpicShape() const;
+
+	// isMonoforum() ? monoforumLink() : nullptr
+	[[nodiscard]] ChannelData *monoforumBroadcast() const;
+
+	// isMonoforum() ? nullptr : monoforumLink()
+	[[nodiscard]] ChannelData *broadcastMonoforum() const;
 
 	void updateFull();
 	void updateFullForced();
@@ -313,13 +353,26 @@ public:
 		const ImageLocation &location,
 		bool hasVideo);
 	void setUserpicPhoto(const MTPPhoto &data);
+
 	void paintUserpic(
 		Painter &p,
 		Ui::PeerUserpicView &view,
-		int x,
-		int y,
-		int size,
-		bool forceCircle = false) const;
+		PaintUserpicContext context) const;
+	void paintUserpic(
+			Painter &p,
+			Ui::PeerUserpicView &view,
+			int x,
+			int y,
+			int size,
+			bool forceCircle = false) const {
+		paintUserpic(p, view, {
+			.position = { x, y },
+			.size = size,
+			.shape = (forceCircle
+				? Ui::PeerUserpicShape::Circle
+				: Ui::PeerUserpicShape::Auto),
+		});
+	}
 	void paintUserpicLeft(
 			Painter &p,
 			Ui::PeerUserpicView &view,
@@ -376,9 +429,13 @@ public:
 	[[nodiscard]] bool canPinMessages() const;
 	[[nodiscard]] bool canEditMessagesIndefinitely() const;
 	[[nodiscard]] bool canCreatePolls() const;
+	[[nodiscard]] bool canCreateTodoLists() const;
 	[[nodiscard]] bool canCreateTopics() const;
 	[[nodiscard]] bool canManageTopics() const;
+	[[nodiscard]] bool canManageGifts() const;
+	[[nodiscard]] bool canTransferGifts() const;
 	[[nodiscard]] bool canExportChatHistory() const;
+	[[nodiscard]] bool autoTranslation() const;
 
 	// Returns true if about text was changed.
 	bool setAbout(const QString &newAbout);
@@ -401,11 +458,18 @@ public:
 			? _barSettings.changes()
 			: (_barSettings.value() | rpl::type_erased());
 	}
+	[[nodiscard]] int paysPerMessage() const;
+	void clearPaysPerMessage();
 	[[nodiscard]] QString requestChatTitle() const;
 	[[nodiscard]] TimeId requestChatDate() const;
 	[[nodiscard]] UserData *businessBot() const;
 	[[nodiscard]] QString businessBotManageUrl() const;
 	void clearBusinessBot();
+	[[nodiscard]] QString phoneCountryCode() const;
+	[[nodiscard]] int registrationMonth() const;
+	[[nodiscard]] int registrationYear() const;
+	[[nodiscard]] TimeId nameChangeDate() const;
+	[[nodiscard]] TimeId photoChangeDate() const;
 
 	enum class TranslationFlag : uchar {
 		Unknown,
@@ -480,6 +544,8 @@ public:
 	[[nodiscard]] bool hasUnreadStories() const;
 	void setStoriesState(StoriesState state);
 
+	[[nodiscard]] int peerGiftsCount() const;
+
 	const PeerId id;
 	MTPinputPeer input = MTP_inputPeerEmpty();
 
@@ -491,6 +557,7 @@ protected:
 	void updateUserpic(PhotoId photoId, MTP::DcId dcId, bool hasVideo);
 	void clearUserpic();
 	void invalidateEmptyUserpic();
+	void checkTrustedPayForMessage();
 
 private:
 	void fillNames();
@@ -520,14 +587,15 @@ private:
 	base::flat_set<QString> _nameWords; // for filtering
 	base::flat_set<QChar> _nameFirstLetters;
 
-	DocumentId _emojiStatusId = 0;
-	uint64 _backgroundEmojiId = 0;
+	EmojiStatusId _emojiStatusId;
+	DocumentId _backgroundEmojiId = 0;
 	crl::time _lastFullUpdate = 0;
 
 	QString _name;
-	uint32 _nameVersion : 30 = 1;
+	uint32 _nameVersion : 29 = 1;
 	uint32 _sensitiveContent : 1 = 0;
 	uint32 _wallPaperOverriden : 1 = 0;
+	uint32 _checkedTrustedPayForMessage : 1 = 0;
 
 	TimeId _ttlPeriod = 0;
 
@@ -555,10 +623,12 @@ void SetTopPinnedMessageId(
 [[nodiscard]] FullMsgId ResolveTopPinnedId(
 	not_null<PeerData*> peer,
 	MsgId topicRootId,
+	PeerId monoforumPeerId,
 	PeerData *migrated = nullptr);
 [[nodiscard]] FullMsgId ResolveMinPinnedId(
 	not_null<PeerData*> peer,
 	MsgId topicRootId,
+	PeerId monoforumPeerId,
 	PeerData *migrated = nullptr);
 
 } // namespace Data

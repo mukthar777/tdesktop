@@ -157,7 +157,9 @@ void CodeWidget::resizeEvent(QResizeEvent *e) {
 }
 
 void CodeWidget::updateControlsGeometry() {
-	_code->moveToLeft(contentLeft(), contentTop() + st::introStepFieldTop);
+	_code->moveToLeft(
+		contentLeft() - st::shakeShift - st::lineWidth,
+		contentTop() + st::introStepFieldTop + st::introPhoneTop * 3);
 	auto linkTop = _code->y() + _code->height() + st::introLinkTop;
 	_noTelegramCode->moveToLeft(contentLeft() + st::buttonRadius, linkTop);
 	_callLabel->moveToLeft(contentLeft() + st::buttonRadius, linkTop);
@@ -300,6 +302,9 @@ void CodeWidget::callDone(const MTPauth_SentCode &result) {
 		}
 	}, [&](const MTPDauth_sentCodeSuccess &data) {
 		finish(data.vauthorization());
+	}, [](const MTPDauth_sentCodePaymentRequired &) {
+		LOG(("API Error: Unexpected auth.sentCodePaymentRequired "
+			"(CodeWidget::callDone)."));
 	});
 }
 
@@ -415,6 +420,9 @@ void CodeWidget::noTelegramCodeDone(const MTPauth_SentCode &result) {
 		updateDescText();
 	}, [&](const MTPDauth_sentCodeSuccess &data) {
 		finish(data.vauthorization());
+	}, [](const MTPDauth_sentCodePaymentRequired &) {
+		LOG(("API Error: Unexpected auth.sentCodePaymentRequired "
+			"(CodeWidget::noTelegramCodeDone)."));
 	});
 }
 
